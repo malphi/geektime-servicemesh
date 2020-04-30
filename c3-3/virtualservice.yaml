@@ -1,0 +1,20 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: test-gateway
+spec:
+  hosts:
+  - "*"
+  gateways:
+  - test-gateway
+  http:
+  - match:
+    - uri:
+        prefix: /details
+    - uri:
+        exact: /health
+    route:
+    - destination:
+        host: details
+        port:
+          number: 9080

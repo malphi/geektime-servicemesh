@@ -1,0 +1,3 @@
+本课官方代码如下：
+kubectl apply -f samples/bookinfo/networking/virtual-service-all-v1.yaml
+kubectl apply -f samples/bookinfo/networking/destination-rule-all.yaml

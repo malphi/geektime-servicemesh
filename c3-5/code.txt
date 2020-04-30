@@ -1,0 +1,4 @@
+官方代码：
+samples/bookinfo/networking/virtual-service-all-v1.yaml
+// 转到v3
+samples/bookinfo/networking/virtual-service-reviews-50-v3.yaml

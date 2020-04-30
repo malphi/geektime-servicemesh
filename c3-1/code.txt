@@ -1,0 +1,3 @@
+本课代码可在官方安装包下获取：
+samples/bookinfo/platform/kube/bookinfo.yaml
+samples/bookinfo/networking/bookinfo-gateway.yaml
