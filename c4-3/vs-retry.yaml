@@ -1,0 +1,21 @@
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: httpbin
+  namespace: demo
+spec:
+  hosts:
+  - "*"
+  gateways:
+  - httpbin-gateway
+  http:
+  - route:
+    - destination:
+        host: httpbin
+        port:
+          number: 8000
+    retry:
+      attempts: 3
+      perTryTimeout: 1s
+    timeout: 8s
+
