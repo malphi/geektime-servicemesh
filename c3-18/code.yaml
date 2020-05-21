@@ -1,0 +1,38 @@
+# 给default添加命名空间策略
+# 兼容模式
+kubectl apply -f - <<EOF
+apiVersion: "security.istio.io/v1beta1"
+kind: "PeerAuthentication"
+metadata:
+  name: "default"
+  namespace: "default"
+spec:
+  mtls:
+    mode: PERMISSIVE
+EOF
+
+# 严格模式
+kubectl apply -f - <<EOF
+apiVersion: "security.istio.io/v1beta1"
+kind: "PeerAuthentication"
+metadata:
+  name: "default"
+  namespace: "default"
+spec:
+  mtls:
+    mode: STRICT
+EOF
+
+# 注入即可访问
+kubectl apply -f <(istioctl kube-inject -f samples/sleep/sleep.yaml) -n testauth
+
+# 添加全局策略，只添加
+kubectl apply -f - <<EOF
+apiVersion: "security.istio.io/v1beta1"
+kind: "PeerAuthentication"
+metadata:
+  name: "default"
+spec:
+  mtls:
+    mode: STRICT
+EOF

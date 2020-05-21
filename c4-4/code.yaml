@@ -1,0 +1,87 @@
+# 创建授权 - 特定服务，注意没有rule，表示deny当前服务
+kubectl apply -f - <<EOF
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: httpbin
+  namespace: demo
+spec:
+  selector:
+    matchLabels:
+      app: httpbin
+EOF
+
+#不通过：kubectl exec -it -n demo sleep-6bdb595bcb-wg6bc -c sleep -- curl "http://httpbin.demo:8000/get"
+#通过：kubectl exec -it -n demo sleep-6bdb595bcb-wg6bc -c sleep -- curl "http://httpbin-v2.demo:8000/get"
+
+# 来源必须是demo ns
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+ name: httpbin
+ namespace: demo
+spec:
+ action: ALLOW
+ rules:
+ - from:
+   - source:
+       principals: ["cluster.local/ns/demo/sa/sleep"]
+   - source:
+       namespaces: ["demo"]
+
+#通过：kubectl exec -it -n demo sleep-6bdb595bcb-wg6bc -c sleep -- curl "http://httpbin.demo:8000/get"
+#不通过： kubectl exec -it -n testauth sleep-57ddb67999-bwbkq -c sleep -- curl "http://httpbin.demo:8000/get"
+#修改service account 为testauth, 通过
+
+
+# 只容许特定接口
+kubectl apply -f - <<EOF
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+ name: httpbin
+ namespace: demo
+spec:
+ action: ALLOW
+ rules:
+ - from:
+   - source:
+       principals: ["cluster.local/ns/demo/sa/sleep"]
+   - source:
+       namespaces: ["demo"]
+   to:
+   - operation:
+       methods: ["GET"]
+       paths: ["/get"]
+EOF
+
+#通过：kubectl exec -it -n demo sleep-6bdb595bcb-wg6bc -c sleep -- curl "http://httpbin.demo:8000/get"
+#不通： kubectl exec -it -n demo sleep-6bdb595bcb-wg6bc -c sleep -- curl "http://httpbin.demo:8000/ip"
+
+
+# 其他特定条件 - 请求头
+kubectl apply -f - <<EOF
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+ name: httpbin
+ namespace: demo
+spec:
+ action: ALLOW
+ rules:
+ - from:
+   - source:
+       principals: ["cluster.local/ns/demo/sa/sleep"]
+   - source:
+       namespaces: ["demo"]
+   to:
+   - operation:
+       methods: ["GET"]
+       paths: ["/get"]
+   when:
+   - key: request.headers[x-rfma-token]
+     values: ["test*"]
+EOF
+
+#不通过：kubectl exec -it -n demo sleep-6bdb595bcb-wg6bc -c sleep -- curl "http://httpbin.demo:8000/get"
+#加token通过：kubectl exec -it -n demo sleep-6bdb595bcb-wg6bc -c sleep -- curl "http://httpbin.demo:8000/get" -H x-rfma-token:test1

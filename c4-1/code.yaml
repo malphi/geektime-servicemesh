@@ -1,0 +1,124 @@
+# 安装fluxctl
+brew install fluxctl
+
+# 创建ns
+kubectl create ns flux
+
+# 部署flux, 先clone repo https://github.com/fluxcd/flux.git
+# 修改git 信息：https://github.com/fluxcd/flux/blob/master/deploy/flux-deployment.yaml
+k apply -k deploy
+
+# 方法2
+fluxctl install \
+--git-user=xxx \
+--git-email=xxx@xxx \
+--git-url=git@github.com:xxx/smdemo \
+--namespace=flux | kubectl apply -f -
+
+# 写入deploy key
+export FLUX_FORWARD_NAMESPACE=flux
+#获取ssh key
+fluxctl identity --k8s-fwd-ns flux
+
+# 建demo ns,添加注入
+k create ns demo
+k label namespace demo istio-injection=enabled
+
+#### 添加httpbin 文件
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: httpbin
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: httpbin
+  labels:
+    app: httpbin
+spec:
+  ports:
+  - name: http
+    port: 8000
+    targetPort: 80
+  selector:
+    app: httpbin
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: httpbin
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: httpbin
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: httpbin
+        version: v1
+    spec:
+      serviceAccountName: httpbin
+      containers:
+      - image: docker.io/kennethreitz/httpbin
+        imagePullPolicy: IfNotPresent
+        name: httpbin
+        ports:
+        - containerPort: 80
+        
+        
+# 同步
+fluxctl sync --k8s-fwd-ns flux
+
+# 添加sleep
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sleep
+  namespace: demo
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sleep
+  namespace: demo
+  labels:
+    app: sleep
+spec:
+  ports:
+  - port: 80
+    name: http
+  selector:
+    app: sleep
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sleep
+  namespace: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sleep
+  template:
+    metadata:
+      labels:
+        app: sleep
+    spec:
+      serviceAccountName: sleep
+      containers:
+      - name: sleep
+        image: governmentpaas/curl-ssl
+        command: ["/bin/sleep", "3650d"]
+        imagePullPolicy: IfNotPresent
+        volumeMounts:
+        - mountPath: /etc/sleep/tls
+          name: secret-volume
+      volumes:
+      - name: secret-volume
+        secret:
+          secretName: sleep-secret
+          optional: true

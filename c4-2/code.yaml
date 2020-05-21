@@ -1,0 +1,175 @@
+# add repo
+helm repo add flagger https://flagger.app
+
+# install crd
+kubectl apply -f https://raw.githubusercontent.com/weaveworks/flagger/master/artifacts/flagger/crd.yaml
+
+# 部署flagger with istio
+helm upgrade -i flagger flagger/flagger \
+--namespace=istio-system \
+--set crd.create=false \
+--set meshProvider=istio \
+--set metricsServer=http://prometheus.istio-system:9090
+
+#slack
+# https://api.slack.com/messaging/webhooks
+helm upgrade -i flagger flagger/flagger \
+--namespace=istio-system \
+--set crd.create=false \
+--set slack.url=https://hooks.slack.com/services/xxxxxx \
+--set slack.channel=general \
+--set slack.user=flagger
+
+# grafana
+helm upgrade -i flagger-grafana flagger/grafana \
+--namespace=istio-system \
+--set url=http://prometheus.istio-system:9090 \
+--set user=admin \
+--set password=admin
+
+# 部署flagger,或者下载repo直接执行
+kubectl apply -k github.com/weaveworks/flagger//kustomize/istio
+
+# ingress for expose mesh
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: public-gateway
+  namespace: istio-system
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - "*"
+        
+#部署应用和tester
+kubectl apply -k github.com/weaveworks/flagger//kustomize/tester
+#或者 先clone repo
+k apply -f deployment.yaml -n demo
+k apply -f service.yaml -n demo
+
+# 添加hpa
+k apply -n demo -f - <<EOF
+apiVersion: autoscaling/v2beta1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: httpbin
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: httpbin
+  minReplicas: 2
+  maxReplicas: 4
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      # scale up if usage is above
+      # 99% of the requested CPU (100m)
+      targetAverageUtilization: 99
+EOF
+
+# 创建 canary 分析
+apiVersion: flagger.app/v1beta1
+kind: Canary
+metadata:
+  name: httpbin
+  namespace: demo
+spec:
+  # deployment reference
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: httpbin
+  # the maximum time in seconds for the canary deployment
+  # to make progress before it is rollback (default 600s)
+  progressDeadlineSeconds: 60
+  # HPA reference (optional)
+  autoscalerRef:
+    apiVersion: autoscaling/v2beta1
+    kind: HorizontalPodAutoscaler
+    name: httpbin
+  service:
+    # service port number
+    port: 8000
+    # container port number or name (optional)
+    targetPort: 80
+    # Istio gateways (optional)
+    gateways:
+    - public-gateway.istio-system.svc.cluster.local
+  analysis:
+    # schedule interval (default 60s)
+    interval: 30s
+    # max number of failed metric checks before rollback
+    threshold: 5
+    # max traffic percentage routed to canary
+    # percentage (0-100)
+    maxWeight: 100
+    # canary increment step
+    # percentage (0-100)
+    stepWeight: 20
+    metrics:
+    - name: request-success-rate
+      # minimum req success rate (non 5xx responses)
+      # percentage (0-100)
+      thresholdRange:
+        min: 99
+      interval: 1m
+    - name: latency
+      templateRef:
+        name: latency
+        namespace: istio-system
+      # maximum req duration P99
+      # milliseconds
+      thresholdRange:
+        max: 500
+      interval: 30s
+    # testing (optional)
+    webhooks:
+      - name: load-test
+        url: http://flagger-loadtester.test/
+        timeout: 5s
+        metadata:
+          cmd: "hey -z 1m -q 10 -c 2 http://httpbin-canary.demo:8000/headers"
+
+# 创建metric for 1.5
+k apply -f - <<EOF
+apiVersion: flagger.app/v1beta1
+kind: MetricTemplate
+metadata:
+  name: latency
+  namespace: istio-system
+spec:
+  provider:
+    type: prometheus
+    address: http://prometheus.istio-system:9090
+  query: |
+    histogram_quantile(
+        0.99,
+        sum(
+            rate(
+                istio_request_duration_milliseconds_bucket{
+                    reporter="destination",
+                    destination_workload_namespace="{{ namespace }}",
+                    destination_workload=~"{{ target }}"
+                }[{{ interval }}]
+            )
+        ) by (le)
+    )
+EOF
+
+# 触发灰度, dep/configmap/secret 都会触发
+kubectl -n demo set image deployment/httpbin httpbin=httpbin-v2
+
+#循环访问
+k exec -it -n demo pod/sleep-6bdb595bcb-bstrp -c sleep sh
+while [ 1 ]; do curl http://httpbin.demo:8000/headers;sleep 2s; done
+
+# 开始后查看Virtual Service
+k describe vs httpbin -ndemo
